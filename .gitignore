@@ -1,0 +1,25 @@
+# Node
+node_modules/
+dist/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Android / Gradle
+.gradle/
+.idea/
+local.properties
+*.iml
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# OS
+.DS_Store
+Thumbs.db
