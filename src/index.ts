@@ -1,4 +1,5 @@
 import "dotenv/config";
+import deviceTokenRouter from "./routes/deviceToken";
 import express from "express";
 import geofenceEventsRouter from "./routes/geofenceEvents";
 import tripsRouter from "./routes/trips";
@@ -6,6 +7,8 @@ import locationsRouter from "./routes/locations";
 
 const app = express();
 app.use(express.json());
+app.use("/api/v1/device-token", deviceTokenRouter);
+app.use("/api/v1/device-token", deviceTokenRouter);
 
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
