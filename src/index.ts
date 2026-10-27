@@ -1,10 +1,14 @@
 import "dotenv/config";
 import deviceTokenRouter from "./routes/deviceToken";
 import express from "express";
+import deviceTokenRouter from "./routes/deviceToken";
 import geofenceEventsRouter from "./routes/geofenceEvents";
 import tripsRouter from "./routes/trips";
 import locationsRouter from "./routes/locations";
-
+app.use("/api/v1/geofence-events", geofenceEventsRouter);
+app.use("/api/v1/trips", tripsRouter);
+app.use("/api/v1/locations", locationsRouter);
+app.use("/api/v1/device-token", deviceTokenRouter);
 const app = express();
 app.use(express.json());
 app.use("/api/v1/device-token", deviceTokenRouter);
