@@ -1,3 +1,4 @@
+import admin from "firebase-admin";
 import { pool } from "../db/pool";
 import { sendSms } from "./sms.service";
 import { GeofenceEventInput, LocationRow } from "../types";
@@ -70,7 +71,7 @@ export async function handleGeofenceEvent(
   if (input.eventType === "EXIT") {
     return handleExit(userId, location, input.eventTime);
   }
-  return handleEnter(userId, location, input.eventTime);
+  return handleEnter(userId, deviceId, location, input.eventTime);
 }
 
 async function handleExit(userId: string, location: LocationRow, eventTime: string) {
@@ -91,7 +92,13 @@ async function handleExit(userId: string, location: LocationRow, eventTime: stri
   return { debounced: false as const, kind: "DEPARTURE" as const, tripId: rows[0].id };
 }
 
-async function handleEnter(userId: string, location: LocationRow, eventTime: string) {
+
+async function handleEnter(
+  userId: string,
+  deviceId: string,
+  location: LocationRow,
+  eventTime: string
+) {
   const openTrip = await pool.query(
     `SELECT id, departure_time FROM trips
      WHERE user_id = $1 AND status = 'IN_PROGRESS'
@@ -105,33 +112,80 @@ async function handleEnter(userId: string, location: LocationRow, eventTime: str
   if (openTrip.rowCount && openTrip.rowCount > 0) {
     tripId = openTrip.rows[0].id;
     const departureTime = openTrip.rows[0].departure_time as string | null;
+
     if (departureTime) {
       durationSeconds = Math.round(
-        (new Date(eventTime).getTime() - new Date(departureTime).getTime()) / 1000
+        (new Date(eventTime).getTime() -
+          new Date(departureTime).getTime()) / 1000
       );
     }
+
     await pool.query(
       `UPDATE trips
-       SET arrival_location_id = $1, arrival_time = $2, duration_seconds = $3,
-           status = 'COMPLETED', updated_at = now()
+       SET arrival_location_id = $1, arrival_time = $2,
+           duration_seconds = $3, status = 'COMPLETED',
+           updated_at = now()
        WHERE id = $4`,
       [location.id, eventTime, durationSeconds, tripId]
     );
   } else {
-    // No matching departure was recorded (e.g. app was killed) — still log the arrival.
     const { rows } = await pool.query(
-      `INSERT INTO trips (user_id, arrival_location_id, arrival_time, status)
+      `INSERT INTO trips
+       (user_id, arrival_location_id, arrival_time, status)
        VALUES ($1, $2, $3, 'COMPLETED')
        RETURNING id`,
       [userId, location.id, eventTime]
     );
+
     tripId = rows[0].id;
   }
 
-  const notifications = await notifyGuardians(userId, tripId, location, eventTime);
+  // Send FCM to the Android device that reported this event.
+  try {
+    const result = await pool.query(
+      `SELECT fcm_token FROM devices
+       WHERE id = $1 AND user_id = $2`,
+      [deviceId, userId]
+    );
 
-  return { debounced: false as const, kind: "ARRIVAL" as const, tripId, durationSeconds, notifications };
+    const fcmToken = result.rows[0]?.fcm_token;
+
+    if (fcmToken && admin.apps.length > 0) {
+      await admin.messaging().send({
+        token: fcmToken,
+        data: {
+          event: "TRIP_COMPLETED",
+          tripId: String(tripId),
+          locationName: location.name,
+          eventTime: String(eventTime),
+        },
+        android: {
+          priority: "high",
+        },
+      });
+
+      console.log("Trip completion FCM sent", { tripId });
+    } else {
+      console.warn("FCM not sent: token missing or Firebase Admin not initialized");
+    }
+  } catch (error) {
+    // Keep the saved trip successful even if push delivery fails.
+    console.error("Failed to send trip completion FCM", error);
+  }
+
+  const notifications = await notifyGuardians(
+    userId, tripId, location, eventTime
+  );
+
+  return {
+    debounced: false as const,
+    kind: "ARRIVAL" as const,
+    tripId,
+    durationSeconds,
+    notifications,
+  };
 }
+
 
 async function notifyGuardians(
   userId: string,
